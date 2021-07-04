@@ -1,0 +1,3 @@
+.pwvault
+host_vars/*
+!host_vars/example_host_file.yml

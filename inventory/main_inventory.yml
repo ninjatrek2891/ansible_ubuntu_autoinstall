@@ -1,0 +1,4 @@
+---
+all:
+  hosts:
+    machine1.local.net:

@@ -1,0 +1,91 @@
+---
+- name: create iso
+  hosts: all
+  gather_facts: true
+  connection: local
+  tasks:
+    - name: make sure all tools are installed
+      apt:
+        pkg:
+          - p7zip-full
+          - xorriso
+          - wget
+          - isolinux
+
+    - name: clear working directory if it exists
+      file:
+        path: "{{ playbook_location ~ '/' ~ work_dir }}"
+        state: absent
+
+    - name: Create autoinstaller-playbook folder
+      file:
+        path: /mnt/g/autoinstall-playbook/{{ item }}
+        state: directory
+      with_items:
+        - work_dir
+        - finished_dir
+        - installer_iso
+
+    - name: get iso checksum
+      stat:
+        path: "{{ playbook_location ~ installer_iso ~ installer_file }}"
+        checksum_algorithm: sha256
+        get_checksum: yes
+      register: checksum
+
+    - block:
+      - name: get checksum file from ubuntu
+        get_url:
+          url: "{{ ubuntu_url ~ checksum_file }}"
+          dest: "{{ playbook_location ~ installer_iso ~ checksum_file }}"
+
+      - name: get checksum for iso
+        shell: cat "{{ playbook_location ~ installer_iso ~ checksum_file }}" | grep {{ installer_file }} | awk '{print $1}'
+        register: isocheck
+      when: checksum.stat.exists
+    
+    - debug:
+        msg: "Checksums do not match! Downloading ISO"
+      when: checksum.stat.checksum != isocheck.stdout
+
+    - name: Download ISO Installer
+      get_url:
+        url: "{{ ubuntu_url ~ installer_file }}"
+        dest: "{{ playbook_location ~ installer_iso ~ installer_file }}"
+        checksum: "{{ isocheck.stdout }}"
+      when: (checksum.stat.checksum != isocheck.stdout) or (not checksum.stat.exists)
+
+    - name: extract original installer file
+      shell:
+        cmd: xorriso -osirrox on -indev "{{ installer_iso ~ installer_file }}" -extract / "{{ work_dir }}" && chmod -R +w "{{ playbook_location ~ work_dir }}"
+        chdir: "{{ playbook_location }}"
+
+    - name: executing various shell commands
+      shell:
+        cmd: "{{ item }}"
+        chdir: "{{ playbook_location ~ work_dir }}"
+      with_items:
+        - mkdir -p nocloud/
+        - touch nocloud/meta-data
+        - sed -i 's|---|autoinstall ds=nocloud\\\;s=/cdrom/nocloud/ ---|g' boot/grub/grub.cfg
+        - sed -i 's|---|autoinstall ds=nocloud;s=/cdrom/nocloud/ ---|g' isolinux/txt.cfg
+        - md5sum .disk/info > md5sum.txt
+
+    - name: deploying autoinstaller configuration
+      template:
+        src: autoinstaller
+        dest: "{{ playbook_location ~ work_dir }}/nocloud/user-data"
+
+    - name: create new iso file
+      shell:
+        cmd: xorriso -as mkisofs -r -V Ubuntu\ custom\ amd64 -o {{ playbook_location ~ finished_dir ~ ansible_date_time.epoch ~ '-' ~ installer_file }} -J -l -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot -isohybrid-gpt-basdat -isohybrid-apm-hfsplus -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin {{ work_dir }}/boot {{ work_dir }}
+        chdir: "{{ playbook_location }}"
+
+  vars:
+    ubuntu_url: https://releases.ubuntu.com/focal/
+    checksum_file: SHA256SUMS
+    installer_file: ubuntu-20.04.2-live-server-amd64.iso
+    playbook_location: /mnt/g/autoinstall-playbook/
+    installer_iso: installer_iso/
+    finished_dir: finished_dir/
+    work_dir: work_dir/

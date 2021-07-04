@@ -1,0 +1,12 @@
+---
+user:
+  username: user
+  password: $encrypted_password
+  ssh_pubkey: ssh_public_key
+network:
+  hostname: "{{ inventory_hostname }}"
+  ip: ""                # i.e: 172.16.0.10/24
+  gateway: ""           # i.e: 172.16.0.1
+  nameservers: ""       # i.e: 172.16.0.1
+  name_search: ""       # i.e: local.net
+  proxy: "" #Only define when needed

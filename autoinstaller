@@ -1,0 +1,58 @@
+#cloud-config
+autoinstall:
+  apt:
+    geoip: true
+    preserve_sources_list: true
+    primary:
+    - arches: [amd64, i386]
+      uri: http://archive.ubuntu.com/ubuntu
+    - arches: [default]
+      uri: http://ports.ubuntu.com/ubuntu-ports
+  identity: {hostname: {{ network.hostname }}, password: {{ user.password }},
+    realname: {{ user.username }}, username: {{ user.username }} }
+  keyboard: {layout: us, toggle: null, variant: ''}
+  locale: en_US
+  network:
+    ethernets:
+      eth0:
+        addresses: [{{ network.ip }}]
+        gateway4: {{ network.gateway }}
+        nameservers:
+          addresses: [{{ network.nameservers }}]
+          search: [{{ network.name_search}}]
+    version: 2
+  {% if network.proxy is defined %}proxy: {{ network.proxy }}{% endif %}
+
+  ssh:
+    allow-pw: false
+    authorized-keys: [{{ user.ssh_pubkey }}]
+    install-server: true
+  storage:
+    config:
+    - {ptable: gpt, path: /dev/sda, wipe: superblock, preserve: false, name: '', grub_device: false, type: disk, id: disk-sda}
+    - {device: disk-sda, size: 536870912, wipe: superblock, flag: boot, number: 1, preserve: false, grub_device: true, type: partition, id: partition-0}
+    - {fstype: fat32, volume: partition-0, preserve: false, type: format, id: format-0}
+    - {device: disk-sda, size: 1073741824, wipe: superblock, flag: '', number: 2, preserve: false, grub_device: false, type: partition, id: partition-1}
+    - {fstype: ext4, volume: partition-1, preserve: false, type: format, id: format-1}
+    - {device: disk-sda, size: -1, wipe: superblock, flag: '', number: 3, preserve: false, grub_device: false, type: partition, id: partition-2}
+    - name: ubuntu-vg
+      devices: [partition-2]
+      preserve: false
+      type: lvm_volgroup
+      id: lvm_volgroup-0
+    - {name: ubuntu-lv, volgroup: lvm_volgroup-0, size: -1, preserve: false, type: lvm_partition, id: lvm_partition-0}
+    - {fstype: ext4, volume: lvm_partition-0, preserve: false, type: format, id: format-2}
+    - {device: format-2, path: /, type: mount, id: mount-2}
+    - {device: format-1, path: /boot, type: mount, id: mount-1}
+    - {device: format-0, path: /boot/efi, type: mount, id: mount-0}
+  late-commands:
+    - curtin in-target --target=/target -- apt-get update -y
+    - curtin in-target --target=/target -- apt-get install apt-transport-https ca-certificates curl gnupg lsb-release -y
+    - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /target/usr/share/keyrings/docker-archive-keyring.gpg
+    - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /target/etc/apt/sources.list.d/docker.list > /dev/null
+    - curtin in-target --target=/target -- apt-get update -y
+    - curtin in-target --target=/target -- apt-get upgrade -y
+    - curtin in-target --target=/target -- apt-get install docker-ce docker-ce-cli containerd.io -y
+    - sed -ie 's/GRUB_TIMEOUT=.*/GRUB_TIMEOUT=30/' /target/etc/default/grub
+    - curtin in-target --target=/target -- update-grub2
+  version: 1
