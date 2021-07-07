@@ -19,7 +19,7 @@
 
     - name: Create autoinstaller-playbook folder
       file:
-        path: /mnt/g/autoinstall-playbook/{{ item }}
+        path: /mnt/d/autoinstall-playbook/{{ item }}
         state: directory
       with_items:
         - work_dir
@@ -33,27 +33,34 @@
         get_checksum: yes
       register: checksum
 
-    - block:
-      - name: get checksum file from ubuntu
-        get_url:
-          url: "{{ ubuntu_url ~ checksum_file }}"
-          dest: "{{ playbook_location ~ installer_iso ~ checksum_file }}"
+    - name: get checksum file from ubuntu
+      get_url:
+        url: "{{ ubuntu_url ~ checksum_file }}"
+        dest: "{{ playbook_location ~ installer_iso ~ checksum_file }}"
 
-      - name: get checksum for iso
-        shell: cat "{{ playbook_location ~ installer_iso ~ checksum_file }}" | grep {{ installer_file }} | awk '{print $1}'
-        register: isocheck
+    - name: get checksum for iso
+      shell: cat "{{ playbook_location ~ installer_iso ~ checksum_file }}" | grep {{ installer_file }} | awk '{print $1}'
+      register: isocheck
+
+    - block:
+      - debug:
+          msg: "Checksums do not match! Downloading ISO"
+        when: checksum.stat.checksum != isocheck.stdout
+
+      - set_fact:
+          download_iso: true
+        when: checksum.stat.checksum != isocheck.stdout
       when: checksum.stat.exists
     
-    - debug:
-        msg: "Checksums do not match! Downloading ISO"
-      when: checksum.stat.checksum != isocheck.stdout
-
     - name: Download ISO Installer
       get_url:
         url: "{{ ubuntu_url ~ installer_file }}"
         dest: "{{ playbook_location ~ installer_iso ~ installer_file }}"
-        checksum: "{{ isocheck.stdout }}"
-      when: (checksum.stat.checksum != isocheck.stdout) or (not checksum.stat.exists)
+        checksum: "sha:{{ isocheck.stdout }}"
+      when: download_iso is defined or (not checksum.stat.exists)
+      async: 3600
+      poll: 5
+      register: download_checker
 
     - name: extract original installer file
       shell:
@@ -85,7 +92,7 @@
     ubuntu_url: https://releases.ubuntu.com/focal/
     checksum_file: SHA256SUMS
     installer_file: ubuntu-20.04.2-live-server-amd64.iso
-    playbook_location: /mnt/g/autoinstall-playbook/
+    playbook_location: /mnt/d/autoinstall-playbook/
     installer_iso: installer_iso/
     finished_dir: finished_dir/
     work_dir: work_dir/
